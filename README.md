@@ -1,315 +1,459 @@
-Вот готовые коды для вставки в отчёт и компиляции в Linux.
-
----
-
-## **1. `employee_no_mutex.c` (программа БЕЗ мьютекса)**
-
-```c
-#include <stdio.h>     /* стандартный ввод/вывод */
-#include <pthread.h>   /* функции и структуры pthread */
-#include <string.h>    /* для strcpy */
-#include <stdlib.h>    /* для exit() */
-
-#define NUM_EMPLOYEES 2
-
-struct employee {
-    int number;
-    int id;
-    char first_name[20];
-    char last_name[30];
-    char department[30];
-    int room_number;
-};
-
-/* глобальный массив сотрудников */
-struct employee employees[] = {
-    { 1, 12345678, "Danny", "Coresh", "Accounting", 101 },
-    { 2, 87654321, "Misha", "Levyn", "Programmers", 202 }
-};
-
-/* глобальная переменная - "Сотрудник дня" */
-struct employee employee_of_the_day;
-
-/* функция копирования структуры сотрудника */
-void copy_employee(struct employee* from, struct employee* to) {
-    to->number = from->number;
-    to->id = from->id;
-    strcpy(to->first_name, from->first_name);
-    strcpy(to->last_name, from->last_name);
-    strcpy(to->department, from->department);
-    to->room_number = from->room_number;
-}
-
-/* функция, выполняемая в потоке */
-void* do_loop(void* data) {
-    int my_num = *((int*)data); /* номер сотрудника для этого потока */
-    while (1) {
-        /* устанавливаем "Сотрудника дня" */
-        copy_employee(&employees[my_num-1], &employee_of_the_day);
-    }
-    return NULL;
-}
-
-int main() {
-    pthread_t thread1, thread2;
-    int num1 = 1, num2 = 2;
-    struct employee eotd;
-    struct employee* worker;
-    int i;
-
-    /* инициализация первого сотрудника как "Сотрудника дня" */
-    copy_employee(&employees[0], &employee_of_the_day);
-
-    /* создание потоков */
-    pthread_create(&thread1, NULL, do_loop, (void*)&num1);
-    pthread_create(&thread2, NULL, do_loop, (void*)&num2);
-
-    /* основной поток проверяет целостность данных */
-    for (i = 0; i < 60000; i++) {
-        copy_employee(&employee_of_the_day, &eotd);
-        worker = &employees[eotd.number-1];
-
-        if (eotd.id != worker->id) {
-            printf("Ошибка 'id': %d != %d (итерация %d)\n",
-                   eotd.id, worker->id, i);
-            exit(1);
-        }
-        if (strcmp(eotd.first_name, worker->first_name) != 0) {
-            printf("Ошибка 'first_name': %s != %s (итерация %d)\n",
-                   eotd.first_name, worker->first_name, i);
-            exit(1);
-        }
-        if (strcmp(eotd.last_name, worker->last_name) != 0) {
-            printf("Ошибка 'last_name': %s != %s (итерация %d)\n",
-                   eotd.last_name, worker->last_name, i);
-            exit(1);
-        }
-        if (strcmp(eotd.department, worker->department) != 0) {
-            printf("Ошибка 'department': %s != %s (итерация %d)\n",
-                   eotd.department, worker->department, i);
-            exit(1);
-        }
-        if (eotd.room_number != worker->room_number) {
-            printf("Ошибка 'room_number': %d != %d (итерация %d)\n",
-                   eotd.room_number, worker->room_number, i);
-            exit(1);
-        }
-    }
-
-    printf("Успех! Данные всегда оставались согласованными.\n");
-    return 0;
-}
-```
-
----
-
-## **2. `employee_with_mutex.c` (программа С мьютексом)**
-
-```c
-#include <stdio.h>
-#include <pthread.h>
-#include <string.h>
-#include <stdlib.h>
-
-#define NUM_EMPLOYEES 2
-
-/* Глобальный мьютекс */
-pthread_mutex_t a_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-struct employee {
-    int number;
-    int id;
-    char first_name[20];
-    char last_name[30];
-    char department[30];
-    int room_number;
-};
-
-struct employee employees[] = {
-    { 1, 12345678, "Danny", "Coresh", "Accounting", 101 },
-    { 2, 87654321, "Misha", "Levyn", "Programmers", 202 }
-};
-
-struct employee employee_of_the_day;
-
-/* Копирование с защитой мьютексом */
-void copy_employee(struct employee* from, struct employee* to) {
-    pthread_mutex_lock(&a_mutex); /* ЗАХВАТ мьютекса */
-    
-    to->number = from->number;
-    to->id = from->id;
-    strcpy(to->first_name, from->first_name);
-    strcpy(to->last_name, from->last_name);
-    strcpy(to->department, from->department);
-    to->room_number = from->room_number;
-    
-    pthread_mutex_unlock(&a_mutex); /* ОСВОБОЖДЕНИЕ мьютекса */
-}
-
-void* do_loop(void* data) {
-    int my_num = *((int*)data);
-    while (1) {
-        copy_employee(&employees[my_num-1], &employee_of_the_day);
-    }
-    return NULL;
-}
-
-int main() {
-    pthread_t thread1, thread2;
-    int num1 = 1, num2 = 2;
-    struct employee eotd;
-    struct employee* worker;
-    int i;
-
-    copy_employee(&employees[0], &employee_of_the_day);
-
-    pthread_create(&thread1, NULL, do_loop, (void*)&num1);
-    pthread_create(&thread2, NULL, do_loop, (void*)&num2);
-
-    for (i = 0; i < 60000; i++) {
-        copy_employee(&employee_of_the_day, &eotd);
-        worker = &employees[eotd.number-1];
-
-        if (eotd.id != worker->id) {
-            printf("Ошибка 'id': %d != %d (итерация %d)\n",
-                   eotd.id, worker->id, i);
-            exit(1);
-        }
-        if (strcmp(eotd.first_name, worker->first_name) != 0) {
-            printf("Ошибка 'first_name': %s != %s (итерация %d)\n",
-                   eotd.first_name, worker->first_name, i);
-            exit(1);
-        }
-        if (strcmp(eotd.last_name, worker->last_name) != 0) {
-            printf("Ошибка 'last_name': %s != %s (итерация %d)\n",
-                   eotd.last_name, worker->last_name, i);
-            exit(1);
-        }
-        if (strcmp(eotd.department, worker->department) != 0) {
-            printf("Ошибка 'department': %s != %s (итерация %d)\n",
-                   eotd.department, worker->department, i);
-            exit(1);
-        }
-        if (eotd.room_number != worker->room_number) {
-            printf("Ошибка 'room_number': %d != %d (итерация %d)\n",
-                   eotd.room_number, worker->room_number, i);
-            exit(1);
-        }
-    }
-
-    printf("Успех! Данные всегда оставались согласованными.\n");
-    return 0;
-}
-```
-
----
-
-## **3. `mutex1.c` (простой пример с мьютексом)**
-
-```c
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <unistd.h>
+#include <time.h>
 
-void *functionC();
-pthread_mutex_t mutex1 = PTHREAD_MUTEX_INITIALIZER;
-int counter = 0;
+#define MAX_TASKS 10
+#define NUM_PRODUCERS 3
+#define NUM_CONSUMERS 2
 
-int main() {
-    int rc1, rc2;
-    pthread_t thread1, thread2;
+// Структура задачи
+struct Task {
+    int id;
+    int data;
+};
 
-    /* Создаем два независимых потока */
-    if ((rc1 = pthread_create(&thread1, NULL, &functionC, NULL))) {
-        printf("Ошибка создания потока: %d\n", rc1);
-    }
-    if ((rc2 = pthread_create(&thread2, NULL, &functionC, NULL))) {
-        printf("Ошибка создания потока: %d\n", rc2);
-    }
+// Глобальные переменные
+pthread_mutex_t task_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t task_cond = PTHREAD_COND_INITIALIZER;
+pthread_cond_t space_cond = PTHREAD_COND_INITIALIZER;
 
-    /* Ждём завершения потоков */
-    pthread_join(thread1, NULL);
-    pthread_join(thread2, NULL);
+struct Task task_queue[MAX_TASKS];
+int task_count = 0;
+int task_head = 0;
+int task_tail = 0;
+int task_id_counter = 0;
 
-    exit(EXIT_SUCCESS);
+int stop_system = 0;
+int produced_count = 0;
+int consumed_count = 0;
+
+// Функция случайной задержки
+void random_delay(int max_ms) {
+    int ms = (rand() % max_ms) + 1;
+    usleep(ms * 1000);
 }
 
-void *functionC() {
-    pthread_mutex_lock(&mutex1);   /* ЗАХВАТ */
-    counter++;
-    printf("Значение счётчика: %d\n", counter);
-    pthread_mutex_unlock(&mutex1); /* ОСВОБОЖДЕНИЕ */
+// Функция добавления задачи
+void add_task(struct Task task) {
+    pthread_mutex_lock(&task_mutex);
+    
+    // Ждём, пока не появится место в очереди
+    while (task_count >= MAX_TASKS && !stop_system) {
+        pthread_cond_wait(&space_cond, &task_mutex);
+    }
+    
+    if (!stop_system) {
+        task_queue[task_tail] = task;
+        task_tail = (task_tail + 1) % MAX_TASKS;
+        task_count++;
+        produced_count++;
+        
+        printf("Добавлена задача %d (данные: %d). Очередь: %d задач\n", 
+               task.id, task.data, task_count);
+        
+        // Сигнализируем потребителям
+        pthread_cond_signal(&task_cond);
+    }
+    
+    pthread_mutex_unlock(&task_mutex);
+}
+
+// Функция получения задачи
+struct Task get_task() {
+    struct Task task = {0, 0};
+    
+    pthread_mutex_lock(&task_mutex);
+    
+    if (task_count > 0) {
+        task = task_queue[task_head];
+        task_head = (task_head + 1) % MAX_TASKS;
+        task_count--;
+        consumed_count++;
+        
+        // Сигнализируем производителям о свободном месте
+        pthread_cond_signal(&space_cond);
+    }
+    
+    pthread_mutex_unlock(&task_mutex);
+    
+    return task;
+}
+
+// Поток-производитель
+void* producer_thread(void* arg) {
+    int producer_id = *((int*)arg);
+    
+    while (!stop_system) {
+        // Создание новой задачи
+        struct Task new_task;
+        
+        pthread_mutex_lock(&task_mutex);
+        new_task.id = ++task_id_counter;
+        pthread_mutex_unlock(&task_mutex);
+        
+        new_task.data = rand() % 1000;
+        
+        add_task(new_task);
+        
+        // Случайная задержка
+        random_delay(500);
+    }
+    
+    printf("Производитель %d завершает работу\n", producer_id);
     return NULL;
 }
-```
 
----
+// Поток-потребитель (обработчик)
+void* consumer_thread(void* arg) {
+    int consumer_id = *((int*)arg);
+    
+    while (!stop_system) {
+        struct Task task;
+        
+        pthread_mutex_lock(&task_mutex);
+        
+        // Ждём, пока появятся задачи
+        while (task_count == 0 && !stop_system) {
+            pthread_cond_wait(&task_cond, &task_mutex);
+        }
+        
+        if (stop_system) {
+            pthread_mutex_unlock(&task_mutex);
+            break;
+        }
+        
+        pthread_mutex_unlock(&task_mutex);
+        
+        // Получаем задачу
+        task = get_task();
+        
+        if (task.id != 0) {
+            printf("Обработчик %d обрабатывает задачу %d (данные: %d)\n", 
+                   consumer_id, task.id, task.data);
+            
+            // Имитация обработки
+            random_delay(300);
+        }
+    }
+    
+    printf("Обработчик %d завершает работу\n", consumer_id);
+    return NULL;
+}
 
-## **4. `join1.c` (пример с функцией join)**
-
-```c
-#include <stdio.h>
-#include <pthread.h>
-
-#define NTHREADS 10
-
-void *thread_function(void *);
-pthread_mutex_t mutex1 = PTHREAD_MUTEX_INITIALIZER;
-int counter = 0;
-
+// Основная функция
 int main() {
-    pthread_t thread_id[NTHREADS];
-    int i, j;
-
-    /* Создаем 10 потоков */
-    for (i = 0; i < NTHREADS; i++) {
-        pthread_create(&thread_id[i], NULL, thread_function, NULL);
+    pthread_t producers[NUM_PRODUCERS];
+    pthread_t consumers[NUM_CONSUMERS];
+    int producer_ids[NUM_PRODUCERS];
+    int consumer_ids[NUM_CONSUMERS];
+    
+    srand(time(NULL));
+    
+    printf("=== Система обработки задач с условными переменными ===\n");
+    printf("Производителей: %d, Обработчиков: %d\n", NUM_PRODUCERS, NUM_CONSUMERS);
+    printf("Максимальный размер очереди: %d\n\n", MAX_TASKS);
+    
+    // Создание потоков-производителей
+    for (int i = 0; i < NUM_PRODUCERS; i++) {
+        producer_ids[i] = i + 1;
+        pthread_create(&producers[i], NULL, producer_thread, &producer_ids[i]);
     }
-
-    /* Ждём завершения ВСЕХ потоков */
-    for (j = 0; j < NTHREADS; j++) {
-        pthread_join(thread_id[j], NULL);
+    
+    // Создание потоков-потребителей
+    for (int i = 0; i < NUM_CONSUMERS; i++) {
+        consumer_ids[i] = i + 1;
+        pthread_create(&consumers[i], NULL, consumer_thread, &consumer_ids[i]);
     }
-
-    /* Теперь можно безопасно вывести итоговое значение */
-    printf("Итоговое значение счётчика: %d\n", counter);
+    
+    // Даём системе поработать 10 секунд
+    sleep(10);
+    
+    // Остановка системы
+    printf("\nОстановка системы...\n");
+    pthread_mutex_lock(&task_mutex);
+    stop_system = 1;
+    pthread_cond_broadcast(&task_cond);
+    pthread_cond_broadcast(&space_cond);
+    pthread_mutex_unlock(&task_mutex);
+    
+    // Ожидание завершения потоков
+    for (int i = 0; i < NUM_PRODUCERS; i++) {
+        pthread_join(producers[i], NULL);
+    }
+    
+    for (int i = 0; i < NUM_CONSUMERS; i++) {
+        pthread_join(consumers[i], NULL);
+    }
+    
+    // Вывод статистики
+    printf("\n=== Статистика ===\n");
+    printf("Создано задач: %d\n", produced_count);
+    printf("Обработано задач: %d\n", consumed_count);
+    printf("Задач в очереди: %d\n", task_count);
+    
+    // Очистка ресурсов
+    pthread_mutex_destroy(&task_mutex);
+    pthread_cond_destroy(&task_cond);
+    pthread_cond_destroy(&space_cond);
+    
+    printf("\nПрограмма завершена\n");
     return 0;
 }
 
-void *thread_function(void *dummyPtr) {
-    printf("Поток №%ld\n", pthread_self());
-    pthread_mutex_lock(&mutex1);
-    counter++;
-    pthread_mutex_unlock(&mutex1);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <time.h>
+
+/* Количество потоков-обработчиков */
+#define NUM_HANDLER_THREADS 3
+
+/* Глобальные мьютексы - РАЗДЕЛЕННЫЕ */
+pthread_mutex_t request_list_mutex = PTHREAD_MUTEX_INITIALIZER;  // для списка запросов
+pthread_mutex_t cond_mutex = PTHREAD_MUTEX_INITIALIZER;         // для условной переменной
+
+/* Глобальная условная переменная */
+pthread_cond_t got_request = PTHREAD_COND_INITIALIZER;
+
+int num_requests = 0;  /* количество ожидающих запросов */
+
+/* Структура запроса */
+struct request {
+    int number;                 /* номер запроса */
+    struct request* next;       /* указатель на следующий запрос */
+};
+
+struct request* requests = NULL;      /* начало списка запросов */
+struct request* last_request = NULL;  /* последний запрос в списке */
+
+/* 
+ * Функция add_request: добавление запроса в список
+ */
+void add_request(int request_num) {
+    struct request* a_request;
+    
+    /* Создаем структуру нового запроса */
+    a_request = (struct request*)malloc(sizeof(struct request));
+    if (!a_request) {
+        fprintf(stderr, "add_request: ошибка выделения памяти\n");
+        exit(1);
+    }
+    a_request->number = request_num;
+    a_request->next = NULL;
+    
+    /* Блокируем мьютекс списка запросов */
+    pthread_mutex_lock(&request_list_mutex);
+    
+    /* Добавляем запрос в конец списка */
+    if (num_requests == 0) {  /* список пуст */
+        requests = a_request;
+        last_request = a_request;
+    } else {
+        last_request->next = a_request;
+        last_request = a_request;
+    }
+    
+    /* Увеличиваем счетчик запросов */
+    num_requests++;
+    
+    printf("Добавлен запрос #%d (всего в очереди: %d)\n", 
+           request_num, num_requests);
+    fflush(stdout);
+    
+    /* Разблокируем мьютекс списка запросов */
+    pthread_mutex_unlock(&request_list_mutex);
+    
+    /* Блокируем мьютекс условной переменной */
+    pthread_mutex_lock(&cond_mutex);
+    
+    /* Сигнализируем о новом запросе */
+    pthread_cond_signal(&got_request);
+    
+    /* Разблокируем мьютекс условной переменной */
+    pthread_mutex_unlock(&cond_mutex);
+}
+
+/* 
+ * Функция get_request: получение запроса из списка
+ * Возвращает: указатель на запрос или NULL если список пуст
+ */
+struct request* get_request() {
+    struct request* a_request = NULL;
+    
+    /* Блокируем мьютекс списка запросов */
+    pthread_mutex_lock(&request_list_mutex);
+    
+    if (num_requests > 0) {
+        a_request = requests;
+        requests = a_request->next;
+        
+        if (requests == NULL) {  /* это был последний запрос */
+            last_request = NULL;
+        }
+        
+        /* Уменьшаем счетчик запросов */
+        num_requests--;
+    }
+    
+    /* Разблокируем мьютекс списка запросов */
+    pthread_mutex_unlock(&request_list_mutex);
+    
+    return a_request;
+}
+
+/* 
+ * Функция handle_request: обработка запроса
+ */
+void handle_request(struct request* a_request, int thread_id) {
+    if (a_request) {
+        printf("Поток %d обрабатывает запрос #%d\n", 
+               thread_id, a_request->number);
+        fflush(stdout);
+        
+        /* Имитация обработки запроса */
+        usleep(100000 + (rand() % 200000));  /* 100-300 мс */
+    }
+}
+
+/* 
+ * Функция handle_requests_loop: основной цикл обработки запросов
+ */
+void* handle_requests_loop(void* data) {
+    int thread_id = *((int*)data);
+    struct request* a_request;
+    
+    printf("Запущен поток-обработчик #%d\n", thread_id);
+    fflush(stdout);
+    
+    while (1) {
+        /* Проверяем, есть ли запросы в очереди */
+        int has_requests = 0;
+        
+        pthread_mutex_lock(&request_list_mutex);
+        has_requests = (num_requests > 0);
+        pthread_mutex_unlock(&request_list_mutex);
+        
+        if (has_requests) {
+            /* Получаем и обрабатываем запрос */
+            a_request = get_request();
+            if (a_request) {
+                handle_request(a_request, thread_id);
+                free(a_request);
+            }
+        } else {
+            /* Если запросов нет - ждём */
+            pthread_mutex_lock(&cond_mutex);
+            
+            /* ДВОЙНАЯ ПРОВЕРКА для избежания состояния гонки */
+            pthread_mutex_lock(&request_list_mutex);
+            if (num_requests == 0) {
+                /* Разблокируем мьютекс списка перед ожиданием */
+                pthread_mutex_unlock(&request_list_mutex);
+                
+                /* Ожидаем сигнала о новом запросе */
+                pthread_cond_wait(&got_request, &cond_mutex);
+            } else {
+                /* Разблокируем мьютекс списка */
+                pthread_mutex_unlock(&request_list_mutex);
+            }
+            
+            /* Разблокируем мьютекс условной переменной */
+            pthread_mutex_unlock(&cond_mutex);
+        }
+    }
+    
     return NULL;
 }
-```
 
----
-
-## **Инструкция для выполнения в Linux:**
-
-1. **Создайте файлы:**
-   ```bash
-   nano employee_no_mutex.c
-   ```
-   Вставьте код №1, сохраните (Ctrl+O, Enter, Ctrl+X).  
-   Аналогично создайте остальные три файла.
-
-2. **Компиляция:**
-   ```bash
-   gcc -pthread employee_no_mutex.c -o no_mutex
-   gcc -pthread employee_with_mutex.c -o with_mutex
-   gcc -pthread mutex1.c -o mutex1
-   gcc -pthread join1.c -o join1
-   ```
-
-3. **Запуск:**
-   ```bash
-   ./no_mutex        # скорее всего завершится с ошибкой
-   ./with_mutex      # должен пройти все проверки
-   ./mutex1          # вывод: 1, 2
-   ./join1           # вывод ID потоков и итоговое значение 10
-   ```
-
-Эти коды готовы для вставки в отчёт и выполнения в Linux.
+/* Основная функция */
+int main(int argc, char* argv[]) {
+    int i;
+    int thr_id[NUM_HANDLER_THREADS];
+    pthread_t p_threads[NUM_HANDLER_THREADS];
+    
+    srand(time(NULL));
+    
+    printf("=== Сервер с пулом потоков (разделенные мьютексы) ===\n");
+    printf("Количество потоков-обработчиков: %d\n\n", NUM_HANDLER_THREADS);
+    
+    /* Создаем потоки-обработчики */
+    for (i = 0; i < NUM_HANDLER_THREADS; i++) {
+        thr_id[i] = i + 1;
+        pthread_create(&p_threads[i], NULL, handle_requests_loop, (void*)&thr_id[i]);
+    }
+    
+    /* Даем потокам время на запуск */
+    sleep(1);
+    
+    /* Генерируем запросы */
+    printf("\nГенерация запросов...\n");
+    for (i = 1; i <= 20; i++) {
+        add_request(i);
+        
+        /* Случайная пауза между запросами */
+        if (rand() % 3 == 0) {
+            usleep(500000);  /* 500 мс */
+        }
+    }
+    
+    /* Ждем завершения обработки всех запросов */
+    printf("\nОжидание завершения обработки всех запросов...\n");
+    while (1) {
+        pthread_mutex_lock(&request_list_mutex);
+        int remaining = num_requests;
+        pthread_mutex_unlock(&request_list_mutex);
+        
+        if (remaining == 0) {
+            break;
+        }
+        
+        usleep(100000);  /* 100 мс */
+    }
+    
+    /* Даем дополнительное время для вывода */
+    sleep(2);
+    
+    printf("\n=== Все запросы обработаны ===\n");
+    printf("Программа продолжит работу до принудительной остановки (Ctrl+C)\n");
+    
+    /* Ожидаем завершения потоков (в реальной программе нужен механизм остановки) */
+    for (i = 0; i < NUM_HANDLER_THREADS; i++) {
+        pthread_join(p_threads[i], NULL);
+    }
+    
+    /* Очистка ресурсов */
+    pthread_mutex_destroy(&request_list_mutex);
+    pthread_mutex_destroy(&cond_mutex);
+    pthread_cond_destroy(&got_request);
+    
+    return 0;
+}
